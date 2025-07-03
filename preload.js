@@ -1,12 +1,16 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
+    selectFolder: () => ipcRenderer.invoke('select-folder'),
     downloadMinecraft: (progressCallback) => {
-        ipcRenderer.on('download-progress', (event, progress) => {
-            progressCallback(progress);
+        ipcRenderer.on('download-progress', (event, { fileName, progress }) => {
+            progressCallback(fileName, progress);
         });
         ipcRenderer.on('download-error', (event, error) => {
             alert(`Error: ${error}`);
+        });
+        ipcRenderer.on('download-complete', () => {
+            ipcRenderer.send('hide-select-folder-button');
         });
         return ipcRenderer.invoke('download-minecraft');
     },
@@ -18,5 +22,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
             alert(`Success: ${message}`);
         });
         return ipcRenderer.invoke('launch-minecraft', username);
-    }
+    },
+    openFolder: () => ipcRenderer.invoke('open-folder')
 });

@@ -24,25 +24,49 @@
             color: red;
             display: none;
         }
+        #launch-message {
+            display: none;
+            margin-top: 20px;
+        }
+        #file-name {
+            margin-top: 10px;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
     <h1>Minecraft Launcher</h1>
-    <button id="download-button">Download Minecraft</button>
+    <button id="select-folder-button">Select Folder</button>
+    <button id="download-button" disabled>Download Minecraft</button>
     <input type="text" id="username" placeholder="Enter your Minecraft username">
     <button id="launch-button">Launch Minecraft</button>
+    <button id="open-folder-button">Open Folder</button>
 
     <div id="progress-container">
+        <div id="file-name"></div>
         <div id="progress-bar">
             <div id="progress"></div>
         </div>
     </div>
     <div id="error-message"></div>
+    <div id="launch-message">Launching Minecraft...</div>
 
     <script>
+        document.getElementById('select-folder-button').addEventListener('click', async () => {
+            try {
+                const folderPath = await window.electronAPI.selectFolder();
+                alert(`Selected folder: ${folderPath}`);
+                document.getElementById('download-button').disabled = false; // Включаем кнопку скачивания
+                document.getElementById('select-folder-button').style.display = 'none'; // Скрываем кнопку выбора папки
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+            }
+        });
+
         document.getElementById('download-button').addEventListener('click', async () => {
             const progressContainer = document.getElementById('progress-container');
             const progressBar = document.getElementById('progress');
+            const fileNameElement = document.getElementById('file-name');
             const errorMessage = document.getElementById('error-message');
 
             progressContainer.style.display = 'block';
@@ -50,10 +74,12 @@
             progressBar.style.width = '0%';
 
             try {
-                await window.electronAPI.downloadMinecraft((progress) => {
+                await window.electronAPI.downloadMinecraft((fileName, progress) => {
+                    fileNameElement.textContent = `Downloading: ${fileName}`;
                     progressBar.style.width = `${progress}%`;
                 });
                 alert('Minecraft downloaded successfully!');
+                document.getElementById('download-button').disabled = true; // Отключаем кнопку скачивания после успешной загрузки
             } catch (error) {
                 errorMessage.style.display = 'block';
                 errorMessage.textContent = `Error: ${error.message}`;
@@ -69,11 +95,36 @@
                 return;
             }
 
+            // Скрываем кнопку запуска и поле ввода никнейма
+            document.getElementById('launch-button').style.display = 'none';
+            document.getElementById('username').style.display = 'none';
+
+            // Отображаем сообщение о запуске
+            const launchMessage = document.getElementById('launch-message');
+            launchMessage.style.display = 'block';
+
             try {
                 await window.electronAPI.launchMinecraft(username);
             } catch (error) {
                 alert(`Error: ${error.message}`);
+                // Показываем кнопку запуска и поле ввода никнейма снова
+                document.getElementById('launch-button').style.display = 'block';
+                document.getElementById('username').style.display = 'block';
+                launchMessage.style.display = 'none';
             }
+        });
+
+        document.getElementById('open-folder-button').addEventListener('click', async () => {
+            try {
+                await window.electronAPI.openFolder();
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+            }
+        });
+
+        // Скрываем кнопку выбора папки после успешной загрузки
+        window.electronAPI.on('hide-select-folder-button', () => {
+            document.getElementById('select-folder-button').style.display = 'none';
         });
     </script>
 </body>

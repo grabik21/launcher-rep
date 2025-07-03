@@ -1,9 +1,15 @@
 // https://piston-data.mojang.com/v1/objects/b88808bbb3da8d9f453694b5d8f74a3396f1a533/client.jar
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const axios = require('axios');
 const fs = require('fs');
 const { exec } = require('child_process');
+const { promisify } = require('util');
+const stream = require('stream');
+const pipeline = promisify(stream.pipeline);
+
+let selectedFolderPath = '';
+let isDownloaded = false;
 
 function createWindow() {
     const mainWindow = new BrowserWindow({
@@ -33,64 +39,101 @@ app.on('window-all-closed', function () {
 });
 
 // Обработка IPC сообщений
-ipcMain.handle('download-minecraft', async (event) => {
-    const url = 'https://launcher.mojang.com/v1/objects/3737db93722a9e39eeada7c27e7aca28b971b9a5/client.jar';
-    const extension = path.extname(url).substring(1); // Получаем расширение файла
-    const folderPath = path.join(__dirname, 'stormland-launcher');
-    const output = path.join(folderPath, `minecraft_client.${extension}`);
+ipcMain.handle('select-folder', async (event) => {
+    const result = await dialog.showOpenDialog({
+        properties: ['openDirectory']
+    });
 
-    // Проверяем, существует ли файл
-    if (fs.existsSync(output)) {
-        event.sender.send('download-error', 'Minecraft client file already exists.');
-        return;
+    if (!result.canceled) {
+        selectedFolderPath = result.filePaths[0];
+        return selectedFolderPath;
+    } else {
+        throw new Error('Folder selection canceled');
     }
+});
+
+ipcMain.handle('download-minecraft', async (event) => {
+    if (!selectedFolderPath) {
+        throw new Error('No folder selected');
+    }
+
+    if (isDownloaded) {
+        throw new Error('Minecraft is already downloaded');
+    }
+
+    const clientUrl = 'https://piston-data.mojang.com/v1/objects/b88808bbb3da8d9f453694b5d8f74a3396f1a533/client.jar';
+    const joptsimpleUrl = 'https://repo1.maven.org/maven2/net/sf/jopt-simple/jopt-simple/5.0.4/jopt-simple-5.0.4.jar';
+    const folderPath = path.join(selectedFolderPath, 'stormland-launcher');
+    const clientPath = path.join(folderPath, 'minecraft_client.jar');
+    const joptsimplePath = path.join(folderPath, 'jopt-simple-5.0.4.jar');
 
     // Создаем папку, если она не существует
     if (!fs.existsSync(folderPath)) {
         fs.mkdirSync(folderPath);
     }
 
-    try {
-        const response = await axios({
-            url,
-            method: 'GET',
-            responseType: 'stream'
-        });
+    // Функция для скачивания файла
+    const downloadFile = async (url, outputPath, fileName) => {
+        try {
+            const response = await axios({
+                url,
+                method: 'GET',
+                responseType: 'stream'
+            });
 
-        const writer = fs.createWriteStream(output);
-        const totalLength = response.headers['content-length'];
+            const writer = fs.createWriteStream(outputPath);
+            const totalLength = response.headers['content-length'];
 
-        let downloadedLength = 0;
+            let downloadedLength = 0;
 
-        response.data.on('data', (chunk) => {
-            downloadedLength += chunk.length;
-            const progress = Math.round((downloadedLength / totalLength) * 100);
-            event.sender.send('download-progress', progress);
-        });
+            response.data.on('data', (chunk) => {
+                downloadedLength += chunk.length;
+                const progress = Math.round((downloadedLength / totalLength) * 100);
+                event.sender.send('download-progress', { fileName, progress });
+            });
 
-        response.data.pipe(writer);
+            await pipeline(response.data, writer);
+            console.log(`${fileName} downloaded successfully.`);
+        } catch (error) {
+            console.error(`Error downloading ${fileName}:`, error);
+            throw new Error(`Failed to download ${fileName}: ${error.message}`);
+        }
+    };
 
-        return new Promise((resolve, reject) => {
-            writer.on('finish', resolve);
-            writer.on('error', reject);
-        });
-    } catch (error) {
-        console.error('Error downloading file:', error);
-        throw new Error(`Failed to download file: ${error.message}`);
-    }
+    // Скачиваем клиентский JAR
+    await downloadFile(clientUrl, clientPath, 'Minecraft Client');
+
+    // Скачиваем библиотеку joptsimple
+    await downloadFile(joptsimpleUrl, joptsimplePath, 'joptsimple Library');
+
+    // Устанавливаем флаг, что загрузка завершена
+    isDownloaded = true;
+
+    // Отправляем событие о завершении загрузки
+    event.sender.send('download-complete');
 });
 
 ipcMain.handle('launch-minecraft', async (event, username) => {
-    const folderPath = path.join(__dirname, 'stormland-launcher');
-    const clientPath = path.join(folderPath, `minecraft_client.jar`);
+    if (!selectedFolderPath) {
+        throw new Error('No folder selected');
+    }
+
+    const folderPath = path.join(selectedFolderPath, 'stormland-launcher');
+    const clientPath = path.join(folderPath, 'minecraft_client.jar');
+    const joptsimplePath = path.join(folderPath, 'jopt-simple-5.0.4.jar');
 
     if (!fs.existsSync(clientPath)) {
         event.sender.send('launch-error', 'Minecraft client file not found.');
         return;
     }
 
+    if (!fs.existsSync(joptsimplePath)) {
+        event.sender.send('launch-error', 'joptsimple library not found.');
+        return;
+    }
+
     try {
-        const command = `java -Xmx1024M -Xms1024M -jar "${clientPath}" --username "${username}"`;
+        const command = `java -Xmx1024M -Xms1024M -cp "${clientPath}:${joptsimplePath}" -jar "${clientPath}" --username "${username}"`;
         exec(command, (error, stdout, stderr) => {
             if (error) {
                 console.error(`Error: ${error.message}`);
@@ -110,4 +153,13 @@ ipcMain.handle('launch-minecraft', async (event, username) => {
         console.error('Error launching Minecraft:', error);
         event.sender.send('launch-error', `Failed to launch Minecraft: ${error.message}`);
     }
+});
+
+ipcMain.handle('open-folder', async (event) => {
+    if (!selectedFolderPath) {
+        throw new Error('No folder selected');
+    }
+
+    const folderPath = path.join(selectedFolderPath, 'stormland-launcher');
+    shell.openPath(folderPath);
 });
