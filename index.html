@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Minecraft Launcher</title>
+    <style>
+        #progress-container {
+            display: none;
+            margin-top: 20px;
+        }
+        #progress-bar {
+            width: 100%;
+            background-color: #f3f3f3;
+        }
+        #progress-bar div {
+            width: 0%;
+            height: 30px;
+            background-color: #4caf50;
+            text-align: center;
+            line-height: 30px;
+            color: white;
+        }
+        #error-message {
+            color: red;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>Minecraft Launcher</h1>
+    <button id="download-button">Download Minecraft</button>
+    <input type="text" id="username" placeholder="Enter your Minecraft username">
+    <button id="launch-button">Launch Minecraft</button>
+
+    <div id="progress-container">
+        <div id="progress-bar">
+            <div id="progress"></div>
+        </div>
+    </div>
+    <div id="error-message"></div>
+
+    <script>
+        document.getElementById('download-button').addEventListener('click', async () => {
+            const progressContainer = document.getElementById('progress-container');
+            const progressBar = document.getElementById('progress');
+            const errorMessage = document.getElementById('error-message');
+
+            progressContainer.style.display = 'block';
+            errorMessage.style.display = 'none';
+            progressBar.style.width = '0%';
+
+            try {
+                await window.electronAPI.downloadMinecraft((progress) => {
+                    progressBar.style.width = `${progress}%`;
+                });
+                alert('Minecraft downloaded successfully!');
+            } catch (error) {
+                errorMessage.style.display = 'block';
+                errorMessage.textContent = `Error: ${error.message}`;
+            } finally {
+                progressContainer.style.display = 'none';
+            }
+        });
+
+        document.getElementById('launch-button').addEventListener('click', async () => {
+            const username = document.getElementById('username').value;
+            if (!username) {
+                alert('Please enter your Minecraft username.');
+                return;
+            }
+
+            try {
+                await window.electronAPI.launchMinecraft(username);
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+            }
+        });
+    </script>
+</body>
+</html>
